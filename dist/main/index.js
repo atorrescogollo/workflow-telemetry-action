@@ -45382,8 +45382,19 @@ function generateTraceChartForSteps(job) {
     chartContent = chartContent.concat('\t', `title ${job.name}`, '\n');
     chartContent = chartContent.concat('\t', `dateFormat x`, '\n');
     chartContent = chartContent.concat('\t', `axisFormat %H:%M:%S`, '\n');
+    let backgroundSteps = [];
     for (const step of job.steps || []) {
-        if (!step.started_at || !step.completed_at) {
+        if (step.name.trim().toLowerCase().endsWith('(background)')) {
+            backgroundSteps.push(step);
+            continue;
+        }
+        let started_at = step.started_at;
+        let backgroundStepName = /^Attach "(.*)" and wait for completion$/.exec(step.name);
+        if (backgroundStepName) {
+            const startingStep = backgroundSteps.find((backgroundStep) => backgroundStep.name === `${backgroundStepName === null || backgroundStepName === void 0 ? void 0 : backgroundStepName[1]} (background)`) || step;
+            started_at = startingStep.started_at;
+        }
+        if (!started_at || !step.completed_at) {
             continue;
         }
         chartContent = chartContent.concat('\t', `${step.name.replace(/:/g, '-')} : `);
@@ -45398,7 +45409,7 @@ function generateTraceChartForSteps(job) {
             // to show grey
             chartContent = chartContent.concat('done, ');
         }
-        const startTime = new Date(step.started_at).getTime();
+        const startTime = new Date(started_at).getTime();
         const finishTime = new Date(step.completed_at).getTime();
         chartContent = chartContent.concat(`${Math.min(startTime, finishTime)}, ${finishTime}`, '\n');
     }
