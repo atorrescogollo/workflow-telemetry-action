@@ -1,5 +1,6 @@
 import { WorkflowJobStepsType, WorkflowJobType } from './interfaces'
 import * as logger from './logger'
+import * as fs from 'fs'
 
 function generateTraceChartForSteps(job: WorkflowJobType): string {
   let chartContent = ''
@@ -31,26 +32,44 @@ function generateTraceChartForSteps(job: WorkflowJobType): string {
       backgroundSteps.push(step)
       continue
     }
+    let stepName = step.name
     let started_at = step.started_at
-    let backgroundStepName = /^Attach "(.*)" and wait for completion$/.exec(
-      step.name
-    )
-    if (backgroundStepName) {
+    let completed_at = step.completed_at
+
+    logger.info(`Step: ${stepName} - ${step.conclusion}`)
+    let backgroundStepNameMatch =
+      /^Attach "(.*)" and wait for completion$/.exec(stepName)
+    if (backgroundStepNameMatch) {
+      stepName = backgroundStepNameMatch?.[1]
+      logger.debug(`Found background step: ${stepName}`)
       const startingStep = backgroundSteps.find(
-        (backgroundStep) =>
-          backgroundStep.name === `${backgroundStepName?.[1]} (background)`
-      ) || step
-      started_at = startingStep.started_at
+        backgroundStep => backgroundStep.name === `${stepName} (background)`
+      )
+      if (!startingStep) {
+        logger.info(
+          `Unable to find starting step for background step: ${stepName}. Failing over to completed_at of the step`
+        )
+      }
+      started_at = startingStep?.started_at || step.completed_at
+
+      try {
+        completed_at = fs.readFileSync(`/tmp/${stepName}.completed_at`, 'utf8')
+      } catch (error) {
+        logger.info(
+          `Unable to read "${stepName}.completed_at". Leaving completed_at as it finished when attached: ${error}`
+        )
+      }
     }
-    if (!started_at || !step.completed_at) {
+
+    if (!started_at || !completed_at) {
       continue
     }
     chartContent = chartContent.concat(
       '\t',
-      `${step.name.replace(/:/g, '-')} : `
+      `${stepName.replace(/:/g, '-')} : `
     )
 
-    if (step.name === 'Set up job' && step.number === 1) {
+    if (stepName === 'Set up job' && step.number === 1) {
       chartContent = chartContent.concat('milestone, ')
     }
 
@@ -63,7 +82,7 @@ function generateTraceChartForSteps(job: WorkflowJobType): string {
     }
 
     const startTime: number = new Date(started_at).getTime()
-    const finishTime: number = new Date(step.completed_at).getTime()
+    const finishTime: number = new Date(completed_at).getTime()
     chartContent = chartContent.concat(
       `${Math.min(startTime, finishTime)}, ${finishTime}`,
       '\n'

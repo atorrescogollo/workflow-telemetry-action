@@ -45361,6 +45361,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.report = exports.finish = exports.start = void 0;
 const logger = __importStar(__nccwpck_require__(4636));
+const fs = __importStar(__nccwpck_require__(7147));
 function generateTraceChartForSteps(job) {
     let chartContent = '';
     /**
@@ -45388,17 +45389,31 @@ function generateTraceChartForSteps(job) {
             backgroundSteps.push(step);
             continue;
         }
+        let stepName = step.name;
         let started_at = step.started_at;
-        let backgroundStepName = /^Attach "(.*)" and wait for completion$/.exec(step.name);
-        if (backgroundStepName) {
-            const startingStep = backgroundSteps.find((backgroundStep) => backgroundStep.name === `${backgroundStepName === null || backgroundStepName === void 0 ? void 0 : backgroundStepName[1]} (background)`) || step;
-            started_at = startingStep.started_at;
+        let completed_at = step.completed_at;
+        logger.info(`Step: ${stepName} - ${step.conclusion}`);
+        let backgroundStepNameMatch = /^Attach "(.*)" and wait for completion$/.exec(stepName);
+        if (backgroundStepNameMatch) {
+            stepName = backgroundStepNameMatch === null || backgroundStepNameMatch === void 0 ? void 0 : backgroundStepNameMatch[1];
+            logger.debug(`Found background step: ${stepName}`);
+            const startingStep = backgroundSteps.find(backgroundStep => backgroundStep.name === `${stepName} (background)`);
+            if (!startingStep) {
+                logger.info(`Unable to find starting step for background step: ${stepName}. Failing over to completed_at of the step`);
+            }
+            started_at = (startingStep === null || startingStep === void 0 ? void 0 : startingStep.started_at) || step.completed_at;
+            try {
+                completed_at = fs.readFileSync(`/tmp/${stepName}.completed_at`, 'utf8');
+            }
+            catch (error) {
+                logger.info(`Unable to read "${stepName}.completed_at". Leaving completed_at as it finished when attached: ${error}`);
+            }
         }
-        if (!started_at || !step.completed_at) {
+        if (!started_at || !completed_at) {
             continue;
         }
-        chartContent = chartContent.concat('\t', `${step.name.replace(/:/g, '-')} : `);
-        if (step.name === 'Set up job' && step.number === 1) {
+        chartContent = chartContent.concat('\t', `${stepName.replace(/:/g, '-')} : `);
+        if (stepName === 'Set up job' && step.number === 1) {
             chartContent = chartContent.concat('milestone, ');
         }
         if (step.conclusion === 'failure') {
@@ -45410,7 +45425,7 @@ function generateTraceChartForSteps(job) {
             chartContent = chartContent.concat('done, ');
         }
         const startTime = new Date(started_at).getTime();
-        const finishTime = new Date(step.completed_at).getTime();
+        const finishTime = new Date(completed_at).getTime();
         chartContent = chartContent.concat(`${Math.min(startTime, finishTime)}, ${finishTime}`, '\n');
     }
     const postContentItems = [
