@@ -55337,15 +55337,24 @@ function generateTraceChartForSteps(job) {
             stepName = backgroundStepNameMatch === null || backgroundStepNameMatch === void 0 ? void 0 : backgroundStepNameMatch[1];
             logger.debug(`Found background step: ${stepName}`);
             const startingStep = backgroundSteps.find(backgroundStep => backgroundStep.name === `${stepName} (background)`);
-            if (!startingStep) {
-                logger.info(`Unable to find starting step for background step: ${stepName}. Failing over to completed_at of the step`);
+            if (startingStep) {
+                started_at = startingStep.started_at;
+                try {
+                    started_at = fs.readFileSync(`/tmp/${stepName}.started_at`, 'utf8');
+                }
+                catch (error) {
+                    logger.info(`Unable to read "/tmp/${stepName}.started_at". Leaving started_at as when the step started in the background: ${error}`);
+                }
             }
-            started_at = (startingStep === null || startingStep === void 0 ? void 0 : startingStep.started_at) || step.completed_at;
+            else {
+                logger.info(`Unable to find starting step for background step: ${stepName}. Leaving started_at as when the attach step finished`);
+                started_at = step.completed_at;
+            }
             try {
                 completed_at = fs.readFileSync(`/tmp/${stepName}.completed_at`, 'utf8');
             }
             catch (error) {
-                logger.info(`Unable to read "${stepName}.completed_at". Leaving completed_at as it finished when attached: ${error}`);
+                logger.info(`Unable to read "/tmp/${stepName}.completed_at". Leaving completed_at as it finished when attached: ${error}`);
             }
         }
         if (!started_at || !completed_at) {
