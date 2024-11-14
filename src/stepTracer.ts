@@ -37,6 +37,9 @@ function generateTraceChartForSteps(job: WorkflowJobType): string {
     let completed_at = step.completed_at
 
     logger.info(`Step: ${stepName} - ${step.conclusion}`)
+    if (step.conclusion === 'skipped') {
+      continue
+    }
     let backgroundStepNameMatch =
       /^Attach "(.*)" and wait for completion$/.exec(stepName)
     if (backgroundStepNameMatch) {

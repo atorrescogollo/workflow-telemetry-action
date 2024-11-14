@@ -45393,6 +45393,9 @@ function generateTraceChartForSteps(job) {
         let started_at = step.started_at;
         let completed_at = step.completed_at;
         logger.info(`Step: ${stepName} - ${step.conclusion}`);
+        if (step.conclusion === 'skipped') {
+            continue;
+        }
         let backgroundStepNameMatch = /^Attach "(.*)" and wait for completion$/.exec(stepName);
         if (backgroundStepNameMatch) {
             stepName = backgroundStepNameMatch === null || backgroundStepNameMatch === void 0 ? void 0 : backgroundStepNameMatch[1];
