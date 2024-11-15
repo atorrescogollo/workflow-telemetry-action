@@ -2,29 +2,16 @@ import { WorkflowJobStepsType, WorkflowJobType } from './interfaces'
 import * as logger from './logger'
 import * as fs from 'fs'
 
-function generateTraceChartForSteps(job: WorkflowJobType): string {
-  let chartContent = ''
+export type TelemetryData = {
+  number: number
+  name: string
+  conclusion: string
+  startTime: Date
+  endTime: Date
+}
 
-  /**
-     gantt
-       title Build
-       dateFormat x
-       axisFormat %H:%M:%S
-       Set up job : milestone, 1658073446000, 1658073450000
-       Collect Workflow Telemetry : 1658073450000, 1658073450000
-       Run actions/checkout@v2 : 1658073451000, 1658073453000
-       Set up JDK 8 : 1658073453000, 1658073458000
-       Build with Maven : 1658073459000, 1658073654000
-       Run invalid command : crit, 1658073655000, 1658073654000
-       Archive test results : done, 1658073655000, 1658073654000
-       Post Set up JDK 8 : 1658073655000, 1658073654000
-       Post Run actions/checkout@v2 : 1658073655000, 1658073655000
-  */
-
-  chartContent = chartContent.concat('gantt', '\n')
-  chartContent = chartContent.concat('\t', `title ${job.name}`, '\n')
-  chartContent = chartContent.concat('\t', `dateFormat x`, '\n')
-  chartContent = chartContent.concat('\t', `axisFormat %H:%M:%S`, '\n')
+function generateTelemetryDataForSteps(job: WorkflowJobType): TelemetryData[] {
+  let telemetryData: TelemetryData[] = []
 
   let backgroundSteps: WorkflowJobStepsType = []
   for (const step of job.steps || []) {
@@ -76,29 +63,71 @@ function generateTraceChartForSteps(job: WorkflowJobType): string {
     if (!started_at || !completed_at) {
       continue
     }
+
+    telemetryData.push({
+      number: step.number,
+      name: stepName,
+      conclusion: step.conclusion ?? 'unknown',
+      startTime: new Date(started_at),
+      endTime: new Date(completed_at)
+    })
+  }
+
+  return telemetryData
+}
+
+export function generateTraceChartFromTelemetryData(
+  jobName: string,
+  stepsTelemetryData: TelemetryData[]
+): string {
+  let chartContent = ''
+
+  /**
+     gantt
+       title Build
+       dateFormat x
+       axisFormat %H:%M:%S
+       Set up job : milestone, 1658073446000, 1658073450000
+       Collect Workflow Telemetry : 1658073450000, 1658073450000
+       Run actions/checkout@v2 : 1658073451000, 1658073453000
+       Set up JDK 8 : 1658073453000, 1658073458000
+       Build with Maven : 1658073459000, 1658073654000
+       Run invalid command : crit, 1658073655000, 1658073654000
+       Archive test results : done, 1658073655000, 1658073654000
+       Post Set up JDK 8 : 1658073655000, 1658073654000
+       Post Run actions/checkout@v2 : 1658073655000, 1658073655000
+  */
+
+  chartContent = chartContent.concat('gantt', '\n')
+  chartContent = chartContent.concat('\t', `title ${jobName}`, '\n')
+  chartContent = chartContent.concat('\t', `dateFormat x`, '\n')
+  chartContent = chartContent.concat('\t', `axisFormat %H:%M:%S`, '\n')
+
+  for (const stepTelemetryData of stepsTelemetryData) {
+    const stepNumber = stepTelemetryData.number
+    const stepName = stepTelemetryData.name
+    const stepConclusion = stepTelemetryData.conclusion
+    const stepStartTime = stepTelemetryData.startTime.getTime()
+    const stepEndTime = stepTelemetryData.endTime.getTime()
+
     chartContent = chartContent.concat(
       '\t',
       `${stepName.replace(/:/g, '-')} : `
     )
 
-    if (stepName === 'Set up job' && step.number === 1) {
+    if (stepName === 'Set up job' && stepNumber === 1) {
       chartContent = chartContent.concat('milestone, ')
     }
 
-    if (step.conclusion === 'failure') {
+    if (stepConclusion === 'failure') {
       // to show red
       chartContent = chartContent.concat('crit, ')
-    } else if (step.conclusion === 'skipped') {
+    } else if (stepConclusion === 'skipped') {
       // to show grey
       chartContent = chartContent.concat('done, ')
     }
 
-    const startTime: number = new Date(started_at).getTime()
-    const finishTime: number = new Date(completed_at).getTime()
-    chartContent = chartContent.concat(
-      `${Math.min(startTime, finishTime)}, ${finishTime}`,
-      '\n'
-    )
+    chartContent = chartContent.concat(`${stepStartTime}, ${stepEndTime}`, '\n')
   }
 
   const postContentItems: string[] = [
@@ -144,7 +173,7 @@ export async function finish(currentJob: WorkflowJobType): Promise<boolean> {
 
 export async function report(
   currentJob: WorkflowJobType
-): Promise<string | null> {
+): Promise<TelemetryData[] | null> {
   logger.info(`Reporting step tracer result ...`)
 
   if (!currentJob) {
@@ -152,11 +181,11 @@ export async function report(
   }
 
   try {
-    const postContent: string = generateTraceChartForSteps(currentJob)
+    const telemetryData = generateTelemetryDataForSteps(currentJob)
 
     logger.info(`Reported step tracer result`)
 
-    return postContent
+    return telemetryData
   } catch (error: any) {
     logger.error('Unable to report step tracer result')
     logger.error(error)

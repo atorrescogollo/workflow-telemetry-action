@@ -54235,6 +54235,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.reportMetricsToPrometheusPushGateway = void 0;
 const core = __importStar(__nccwpck_require__(2186));
 const github = __importStar(__nccwpck_require__(5438));
 const action_1 = __nccwpck_require__(1231);
@@ -54325,9 +54326,48 @@ function reportAll(currentJob, content) {
         logger.info(`Reporting all content completed`);
     });
 }
+function reportMetricsToPrometheusPushGateway(prometheusPushGatewayUrl, stepsTelemetryData) {
+    return __awaiter(this, void 0, void 0, function* () {
+        let promMetrics = `
+  # TYPE github_action_step_duration_ms gauge
+  # HELP github_action_step_duration_ms Elapsed time for the step in milliseconds
+
+  # TYPE github_action_step_status gauge
+  # HELP github_action_step_status Status of the step. 1 for success, 0 for failure
+  `;
+        for (const stepTelemetryData of stepsTelemetryData) {
+            const stepName = stepTelemetryData.name;
+            const stepConclusion = stepTelemetryData.conclusion;
+            const stepStartTime = stepTelemetryData.startTime.getTime();
+            const stepEndTime = stepTelemetryData.endTime.getTime();
+            const stepNameSafe = stepName.replace(/"/g, '\\"');
+            promMetrics = promMetrics.concat(`
+      github_action_step_duration_ms{step="${stepNameSafe}"} ${stepEndTime - Math.min(stepStartTime, stepEndTime)}
+      github_action_step_status{step="${stepNameSafe}"} ${stepConclusion === 'success' ? 1 : 0}
+      `);
+        }
+        logger.info(`Reporting metrics to Prometheus Push Gateway (prometheusPushGatewayUrl=${prometheusPushGatewayUrl})`);
+        try {
+            const response = yield fetch(prometheusPushGatewayUrl, {
+                method: 'PUT',
+                body: promMetrics
+            });
+            if (!response.ok) {
+                throw new Error(`Failed to report metrics to Prometheus Push Gateway: ${response.status} - ${response.statusText}`);
+            }
+            logger.info(`Reported metrics to Prometheus Push Gateway: ${response.status} - ${response.statusText}`);
+        }
+        catch (error) {
+            logger.error('Unable to report metrics to Prometheus Push Gateway');
+            logger.error(error);
+        }
+    });
+}
+exports.reportMetricsToPrometheusPushGateway = reportMetricsToPrometheusPushGateway;
 function run() {
     return __awaiter(this, void 0, void 0, function* () {
         try {
+            const prometheusPushGatewayUrl = core.getInput('prometheus_push_gateway_url');
             logger.info(`Finishing ...`);
             const currentJob = yield getCurrentJob();
             if (!currentJob) {
@@ -54342,7 +54382,20 @@ function run() {
             // Finish process tracer
             yield processTracer.finish(currentJob);
             // Report step tracer
-            const stepTracerContent = yield stepTracer.report(currentJob);
+            const stepTracerTelemetry = yield stepTracer.report(currentJob);
+            let stepTracerContent = null;
+            if (prometheusPushGatewayUrl !== '' && stepTracerTelemetry !== null) {
+                if (!prometheusPushGatewayUrl.includes('/job/')) {
+                    logger.error(`Prometheus Push Gateway URL must contain the job name. ` +
+                        `Please provide the URL in the format: ` +
+                        `http(s)://<host>(:<port>)/metrics/job/<job-name>/<labelname1>/<labelvalue1>/...'`);
+                    logger.error('Skipping reporting metrics to Prometheus Push Gateway');
+                }
+                else {
+                    reportMetricsToPrometheusPushGateway(prometheusPushGatewayUrl, stepTracerTelemetry);
+                    stepTracerContent = stepTracer.generateTraceChartFromTelemetryData(currentJob.name, stepTracerTelemetry);
+                }
+            }
             // Report stat collector
             const stepCollectorContent = yield statCollector.report(currentJob);
             // Report process tracer
@@ -55295,30 +55348,12 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.report = exports.finish = exports.start = void 0;
+exports.report = exports.finish = exports.start = exports.generateTraceChartFromTelemetryData = void 0;
 const logger = __importStar(__nccwpck_require__(4636));
 const fs = __importStar(__nccwpck_require__(7147));
-function generateTraceChartForSteps(job) {
-    let chartContent = '';
-    /**
-       gantt
-         title Build
-         dateFormat x
-         axisFormat %H:%M:%S
-         Set up job : milestone, 1658073446000, 1658073450000
-         Collect Workflow Telemetry : 1658073450000, 1658073450000
-         Run actions/checkout@v2 : 1658073451000, 1658073453000
-         Set up JDK 8 : 1658073453000, 1658073458000
-         Build with Maven : 1658073459000, 1658073654000
-         Run invalid command : crit, 1658073655000, 1658073654000
-         Archive test results : done, 1658073655000, 1658073654000
-         Post Set up JDK 8 : 1658073655000, 1658073654000
-         Post Run actions/checkout@v2 : 1658073655000, 1658073655000
-    */
-    chartContent = chartContent.concat('gantt', '\n');
-    chartContent = chartContent.concat('\t', `title ${job.name}`, '\n');
-    chartContent = chartContent.concat('\t', `dateFormat x`, '\n');
-    chartContent = chartContent.concat('\t', `axisFormat %H:%M:%S`, '\n');
+function generateTelemetryDataForSteps(job) {
+    var _a;
+    let telemetryData = [];
     let backgroundSteps = [];
     for (const step of job.steps || []) {
         if (step.name.trim().toLowerCase().endsWith('(background)')) {
@@ -55360,21 +55395,56 @@ function generateTraceChartForSteps(job) {
         if (!started_at || !completed_at) {
             continue;
         }
+        telemetryData.push({
+            number: step.number,
+            name: stepName,
+            conclusion: (_a = step.conclusion) !== null && _a !== void 0 ? _a : 'unknown',
+            startTime: new Date(started_at),
+            endTime: new Date(completed_at)
+        });
+    }
+    return telemetryData;
+}
+function generateTraceChartFromTelemetryData(jobName, stepsTelemetryData) {
+    let chartContent = '';
+    /**
+       gantt
+         title Build
+         dateFormat x
+         axisFormat %H:%M:%S
+         Set up job : milestone, 1658073446000, 1658073450000
+         Collect Workflow Telemetry : 1658073450000, 1658073450000
+         Run actions/checkout@v2 : 1658073451000, 1658073453000
+         Set up JDK 8 : 1658073453000, 1658073458000
+         Build with Maven : 1658073459000, 1658073654000
+         Run invalid command : crit, 1658073655000, 1658073654000
+         Archive test results : done, 1658073655000, 1658073654000
+         Post Set up JDK 8 : 1658073655000, 1658073654000
+         Post Run actions/checkout@v2 : 1658073655000, 1658073655000
+    */
+    chartContent = chartContent.concat('gantt', '\n');
+    chartContent = chartContent.concat('\t', `title ${jobName}`, '\n');
+    chartContent = chartContent.concat('\t', `dateFormat x`, '\n');
+    chartContent = chartContent.concat('\t', `axisFormat %H:%M:%S`, '\n');
+    for (const stepTelemetryData of stepsTelemetryData) {
+        const stepNumber = stepTelemetryData.number;
+        const stepName = stepTelemetryData.name;
+        const stepConclusion = stepTelemetryData.conclusion;
+        const stepStartTime = stepTelemetryData.startTime.getTime();
+        const stepEndTime = stepTelemetryData.endTime.getTime();
         chartContent = chartContent.concat('\t', `${stepName.replace(/:/g, '-')} : `);
-        if (stepName === 'Set up job' && step.number === 1) {
+        if (stepName === 'Set up job' && stepNumber === 1) {
             chartContent = chartContent.concat('milestone, ');
         }
-        if (step.conclusion === 'failure') {
+        if (stepConclusion === 'failure') {
             // to show red
             chartContent = chartContent.concat('crit, ');
         }
-        else if (step.conclusion === 'skipped') {
+        else if (stepConclusion === 'skipped') {
             // to show grey
             chartContent = chartContent.concat('done, ');
         }
-        const startTime = new Date(started_at).getTime();
-        const finishTime = new Date(completed_at).getTime();
-        chartContent = chartContent.concat(`${Math.min(startTime, finishTime)}, ${finishTime}`, '\n');
+        chartContent = chartContent.concat(`${stepStartTime}, ${stepEndTime}`, '\n');
     }
     const postContentItems = [
         '',
@@ -55384,6 +55454,7 @@ function generateTraceChartForSteps(job) {
     ];
     return postContentItems.join('\n');
 }
+exports.generateTraceChartFromTelemetryData = generateTraceChartFromTelemetryData;
 ///////////////////////////
 function start() {
     return __awaiter(this, void 0, void 0, function* () {
@@ -55422,9 +55493,9 @@ function report(currentJob) {
             return null;
         }
         try {
-            const postContent = generateTraceChartForSteps(currentJob);
+            const telemetryData = generateTelemetryDataForSteps(currentJob);
             logger.info(`Reported step tracer result`);
-            return postContent;
+            return telemetryData;
         }
         catch (error) {
             logger.error('Unable to report step tracer result');

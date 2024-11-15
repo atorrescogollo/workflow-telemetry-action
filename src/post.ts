@@ -111,8 +111,61 @@ async function reportAll(
   logger.info(`Reporting all content completed`)
 }
 
+export async function reportMetricsToPrometheusPushGateway(
+  prometheusPushGatewayUrl: string,
+  stepsTelemetryData: stepTracer.TelemetryData[]
+): Promise<void> {
+  let promMetrics = `
+  # TYPE github_action_step_duration_ms gauge
+  # HELP github_action_step_duration_ms Elapsed time for the step in milliseconds
+
+  # TYPE github_action_step_status gauge
+  # HELP github_action_step_status Status of the step. 1 for success, 0 for failure
+  `
+
+  for (const stepTelemetryData of stepsTelemetryData) {
+    const stepName = stepTelemetryData.name
+    const stepConclusion = stepTelemetryData.conclusion
+    const stepStartTime = stepTelemetryData.startTime.getTime()
+    const stepEndTime = stepTelemetryData.endTime.getTime()
+
+    const stepNameSafe = stepName.replace(/"/g, '\\"')
+    promMetrics = promMetrics.concat(
+      `
+      github_action_step_duration_ms{step="${stepNameSafe}"} ${stepEndTime - Math.min(stepStartTime, stepEndTime)}
+      github_action_step_status{step="${stepNameSafe}"} ${stepConclusion === 'success' ? 1 : 0}
+      `
+    )
+  }
+
+  logger.info(
+    `Reporting metrics to Prometheus Push Gateway (prometheusPushGatewayUrl=${prometheusPushGatewayUrl})`
+  )
+  try {
+    const response = await fetch(prometheusPushGatewayUrl, {
+      method: 'PUT',
+      body: promMetrics
+    })
+    if (!response.ok) {
+      throw new Error(
+        `Failed to report metrics to Prometheus Push Gateway: ${response.status} - ${response.statusText}`
+      )
+    }
+    logger.info(
+      `Reported metrics to Prometheus Push Gateway: ${response.status} - ${response.statusText}`
+    )
+  } catch (error: any) {
+    logger.error('Unable to report metrics to Prometheus Push Gateway')
+    logger.error(error)
+  }
+}
+
 async function run(): Promise<void> {
   try {
+    const prometheusPushGatewayUrl = core.getInput(
+      'prometheus_push_gateway_url'
+    )
+
     logger.info(`Finishing ...`)
 
     const currentJob: WorkflowJobType | null = await getCurrentJob()
@@ -134,7 +187,29 @@ async function run(): Promise<void> {
     await processTracer.finish(currentJob)
 
     // Report step tracer
-    const stepTracerContent: string | null = await stepTracer.report(currentJob)
+    const stepTracerTelemetry = await stepTracer.report(currentJob)
+
+    let stepTracerContent: string | null = null
+    if (prometheusPushGatewayUrl !== '' && stepTracerTelemetry !== null) {
+      if (!prometheusPushGatewayUrl.includes('/job/')) {
+        logger.error(
+          `Prometheus Push Gateway URL must contain the job name. ` +
+            `Please provide the URL in the format: ` +
+            `http(s)://<host>(:<port>)/metrics/job/<job-name>/<labelname1>/<labelvalue1>/...'`
+        )
+        logger.error('Skipping reporting metrics to Prometheus Push Gateway')
+      } else {
+        reportMetricsToPrometheusPushGateway(
+          prometheusPushGatewayUrl,
+          stepTracerTelemetry
+        )
+        stepTracerContent = stepTracer.generateTraceChartFromTelemetryData(
+          currentJob.name,
+          stepTracerTelemetry
+        )
+      }
+    }
+
     // Report stat collector
     const stepCollectorContent: string | null =
       await statCollector.report(currentJob)

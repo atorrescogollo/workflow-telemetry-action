@@ -45359,30 +45359,12 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.report = exports.finish = exports.start = void 0;
+exports.report = exports.finish = exports.start = exports.generateTraceChartFromTelemetryData = void 0;
 const logger = __importStar(__nccwpck_require__(4636));
 const fs = __importStar(__nccwpck_require__(7147));
-function generateTraceChartForSteps(job) {
-    let chartContent = '';
-    /**
-       gantt
-         title Build
-         dateFormat x
-         axisFormat %H:%M:%S
-         Set up job : milestone, 1658073446000, 1658073450000
-         Collect Workflow Telemetry : 1658073450000, 1658073450000
-         Run actions/checkout@v2 : 1658073451000, 1658073453000
-         Set up JDK 8 : 1658073453000, 1658073458000
-         Build with Maven : 1658073459000, 1658073654000
-         Run invalid command : crit, 1658073655000, 1658073654000
-         Archive test results : done, 1658073655000, 1658073654000
-         Post Set up JDK 8 : 1658073655000, 1658073654000
-         Post Run actions/checkout@v2 : 1658073655000, 1658073655000
-    */
-    chartContent = chartContent.concat('gantt', '\n');
-    chartContent = chartContent.concat('\t', `title ${job.name}`, '\n');
-    chartContent = chartContent.concat('\t', `dateFormat x`, '\n');
-    chartContent = chartContent.concat('\t', `axisFormat %H:%M:%S`, '\n');
+function generateTelemetryDataForSteps(job) {
+    var _a;
+    let telemetryData = [];
     let backgroundSteps = [];
     for (const step of job.steps || []) {
         if (step.name.trim().toLowerCase().endsWith('(background)')) {
@@ -45424,21 +45406,56 @@ function generateTraceChartForSteps(job) {
         if (!started_at || !completed_at) {
             continue;
         }
+        telemetryData.push({
+            number: step.number,
+            name: stepName,
+            conclusion: (_a = step.conclusion) !== null && _a !== void 0 ? _a : 'unknown',
+            startTime: new Date(started_at),
+            endTime: new Date(completed_at)
+        });
+    }
+    return telemetryData;
+}
+function generateTraceChartFromTelemetryData(jobName, stepsTelemetryData) {
+    let chartContent = '';
+    /**
+       gantt
+         title Build
+         dateFormat x
+         axisFormat %H:%M:%S
+         Set up job : milestone, 1658073446000, 1658073450000
+         Collect Workflow Telemetry : 1658073450000, 1658073450000
+         Run actions/checkout@v2 : 1658073451000, 1658073453000
+         Set up JDK 8 : 1658073453000, 1658073458000
+         Build with Maven : 1658073459000, 1658073654000
+         Run invalid command : crit, 1658073655000, 1658073654000
+         Archive test results : done, 1658073655000, 1658073654000
+         Post Set up JDK 8 : 1658073655000, 1658073654000
+         Post Run actions/checkout@v2 : 1658073655000, 1658073655000
+    */
+    chartContent = chartContent.concat('gantt', '\n');
+    chartContent = chartContent.concat('\t', `title ${jobName}`, '\n');
+    chartContent = chartContent.concat('\t', `dateFormat x`, '\n');
+    chartContent = chartContent.concat('\t', `axisFormat %H:%M:%S`, '\n');
+    for (const stepTelemetryData of stepsTelemetryData) {
+        const stepNumber = stepTelemetryData.number;
+        const stepName = stepTelemetryData.name;
+        const stepConclusion = stepTelemetryData.conclusion;
+        const stepStartTime = stepTelemetryData.startTime.getTime();
+        const stepEndTime = stepTelemetryData.endTime.getTime();
         chartContent = chartContent.concat('\t', `${stepName.replace(/:/g, '-')} : `);
-        if (stepName === 'Set up job' && step.number === 1) {
+        if (stepName === 'Set up job' && stepNumber === 1) {
             chartContent = chartContent.concat('milestone, ');
         }
-        if (step.conclusion === 'failure') {
+        if (stepConclusion === 'failure') {
             // to show red
             chartContent = chartContent.concat('crit, ');
         }
-        else if (step.conclusion === 'skipped') {
+        else if (stepConclusion === 'skipped') {
             // to show grey
             chartContent = chartContent.concat('done, ');
         }
-        const startTime = new Date(started_at).getTime();
-        const finishTime = new Date(completed_at).getTime();
-        chartContent = chartContent.concat(`${Math.min(startTime, finishTime)}, ${finishTime}`, '\n');
+        chartContent = chartContent.concat(`${stepStartTime}, ${stepEndTime}`, '\n');
     }
     const postContentItems = [
         '',
@@ -45448,6 +45465,7 @@ function generateTraceChartForSteps(job) {
     ];
     return postContentItems.join('\n');
 }
+exports.generateTraceChartFromTelemetryData = generateTraceChartFromTelemetryData;
 ///////////////////////////
 function start() {
     return __awaiter(this, void 0, void 0, function* () {
@@ -45486,9 +45504,9 @@ function report(currentJob) {
             return null;
         }
         try {
-            const postContent = generateTraceChartForSteps(currentJob);
+            const telemetryData = generateTelemetryDataForSteps(currentJob);
             logger.info(`Reported step tracer result`);
-            return postContent;
+            return telemetryData;
         }
         catch (error) {
             logger.error('Unable to report step tracer result');

@@ -42,6 +42,10 @@ inputs:
     description: "Set to `dark` to generate charts compatible with Github dark mode. Defaults to 'light'."
     default: "light"
     required: false
+  prometheus_push_gateway_url:
+    description: "Prometheus Push Gateway URL to push metrics. If not provided, metrics won't be pushed to Prometheus Push Gateway. It must be a valid URL and contain a job label reference. Example: 'http://pushgateway:9091/metrics/job/my-job'."
+    default: ""
+    required: false
 
 runs:
   using: "node20"
