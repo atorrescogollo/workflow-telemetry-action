@@ -113,15 +113,32 @@ async function reportAll(
 
 export async function reportMetricsToPrometheusPushGateway(
   prometheusPushGatewayUrl: string,
+  job: WorkflowJobType,
   stepsTelemetryData: stepTracer.TelemetryData[]
 ): Promise<void> {
   let promMetrics = `
-  # TYPE github_action_step_duration_ms gauge
-  # HELP github_action_step_duration_ms Elapsed time for the step in milliseconds
+  # TYPE github_actions_job_duration_ms gauge
+  # HELP github_actions_job_duration_ms Elapsed time for the job in milliseconds
 
-  # TYPE github_action_step_status gauge
-  # HELP github_action_step_status Status of the step. 1 for success, 0 for failure
+  # TYPE github_actions_job_conclusion gauge
+  # HELP github_actions_job_conclusion Conclusion of the job. 1 for success, 0 for failure
+
+  # TYPE github_actions_step_duration_ms gauge
+  # HELP github_actions_step_duration_ms Elapsed time for the step in milliseconds
+
+  # TYPE github_actions_step_conclusion gauge
+  # HELP github_actions_step_conclusion Conclusion of the step. 1 for success, 0 for failure
   `
+
+  const jobDuration =
+    new Date(job.completed_at ?? job.started_at).getTime() -
+    new Date(job.started_at).getTime()
+  promMetrics = promMetrics.concat(
+    `
+    github_actions_job_duration_ms{head_sha="${job.head_sha}", job_status="${job.status}", job_conclusion="${job.conclusion}"} ${jobDuration}
+    github_actions_job_conclusion{head_sha="${job.head_sha}", job_status="${job.status}", job_conclusion="${job.conclusion}"} ${job.conclusion === 'success' ? 1 : 0}
+    `
+  )
 
   for (const stepTelemetryData of stepsTelemetryData) {
     const stepName = stepTelemetryData.name
@@ -132,8 +149,8 @@ export async function reportMetricsToPrometheusPushGateway(
     const stepNameSafe = stepName.replace(/"/g, '\\"')
     promMetrics = promMetrics.concat(
       `
-      github_action_step_duration_ms{step="${stepNameSafe}"} ${stepEndTime - Math.min(stepStartTime, stepEndTime)}
-      github_action_step_status{step="${stepNameSafe}"} ${stepConclusion === 'success' ? 1 : 0}
+      github_actions_step_duration_ms{head_sha="${job.head_sha}", job_status="${job.status}", job_conclusion="${job.conclusion}", step_name="${stepNameSafe}", step_conclusion="${stepConclusion}"} ${stepEndTime - Math.min(stepStartTime, stepEndTime)}
+      github_actions_step_conclusion{head_sha="${job.head_sha}", job_status="${job.status}", job_conclusion="${job.conclusion}", step_name="${stepNameSafe}", step_conclusion="${stepConclusion}"} ${stepConclusion === 'success' ? 1 : 0}
       `
     )
   }
@@ -201,6 +218,7 @@ async function run(): Promise<void> {
       } else {
         reportMetricsToPrometheusPushGateway(
           prometheusPushGatewayUrl,
+          currentJob,
           stepTracerTelemetry
         )
         stepTracerContent = stepTracer.generateTraceChartFromTelemetryData(
