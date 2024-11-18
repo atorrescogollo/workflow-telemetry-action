@@ -54326,8 +54326,15 @@ function reportAll(currentJob, content) {
         logger.info(`Reporting all content completed`);
     });
 }
-function reportMetricsToPrometheusPushGateway(prometheusPushGatewayUrl, job, stepsTelemetryData) {
-    var _a;
+function prometheusLabels(labels) {
+    let s = ``;
+    labels.forEach((value, key) => {
+        s += `,${key}="${value.replace(/"/g, '\\"')}"`;
+    });
+    return s.replace(/^,/, '');
+}
+function reportMetricsToPrometheusPushGateway(prometheusPushGatewayUrl, extraLabels, job, stepsTelemetryData) {
+    var _a, _b;
     return __awaiter(this, void 0, void 0, function* () {
         let promMetrics = `
   # TYPE github_actions_job_duration_ms gauge
@@ -54342,21 +54349,34 @@ function reportMetricsToPrometheusPushGateway(prometheusPushGatewayUrl, job, ste
   # TYPE github_actions_step_conclusion gauge
   # HELP github_actions_step_conclusion Conclusion of the step. 1 for success, 0 for failure
   `;
+        let extraLabelsStr = ``;
+        extraLabels.forEach((value, key) => {
+            extraLabelsStr += `,${key}="${value.replace(/"/g, '\\"')}"`;
+        });
         const jobDuration = new Date((_a = job.completed_at) !== null && _a !== void 0 ? _a : job.started_at).getTime() -
             new Date(job.started_at).getTime();
+        let jobPromLabels = new Map();
+        jobPromLabels.set('head_sha', job.head_sha);
+        jobPromLabels.set('job_status', job.status);
+        jobPromLabels.set('job_conclusion', (_b = job.conclusion) !== null && _b !== void 0 ? _b : 'unknown');
+        jobPromLabels = new Map([...jobPromLabels, ...extraLabels]);
         promMetrics = promMetrics.concat(`
-    github_actions_job_duration_ms{head_sha="${job.head_sha}", job_status="${job.status}", job_conclusion="${job.conclusion}"} ${jobDuration}
-    github_actions_job_conclusion{head_sha="${job.head_sha}", job_status="${job.status}", job_conclusion="${job.conclusion}"} ${job.conclusion === 'success' ? 1 : 0}
+    github_actions_job_duration_ms{${prometheusLabels(jobPromLabels)}} ${jobDuration}
+    github_actions_job_conclusion{${prometheusLabels(jobPromLabels)}} ${job.conclusion === 'success' ? 1 : 0}
     `);
         for (const stepTelemetryData of stepsTelemetryData) {
             const stepName = stepTelemetryData.name;
+            const stepNameSafe = stepName.replace(/"/g, '\\"');
             const stepConclusion = stepTelemetryData.conclusion;
             const stepStartTime = stepTelemetryData.startTime.getTime();
             const stepEndTime = stepTelemetryData.endTime.getTime();
-            const stepNameSafe = stepName.replace(/"/g, '\\"');
+            let stepPromlabels = new Map();
+            stepPromlabels.set('step_name', stepNameSafe);
+            stepPromlabels.set('step_conclusion', stepConclusion);
+            stepPromlabels = new Map([...stepPromlabels, ...jobPromLabels]);
             promMetrics = promMetrics.concat(`
-      github_actions_step_duration_ms{head_sha="${job.head_sha}", job_status="${job.status}", job_conclusion="${job.conclusion}", step_name="${stepNameSafe}", step_conclusion="${stepConclusion}"} ${stepEndTime - Math.min(stepStartTime, stepEndTime)}
-      github_actions_step_conclusion{head_sha="${job.head_sha}", job_status="${job.status}", job_conclusion="${job.conclusion}", step_name="${stepNameSafe}", step_conclusion="${stepConclusion}"} ${stepConclusion === 'success' ? 1 : 0}
+      github_actions_step_duration_ms{${prometheusLabels(stepPromlabels)}"} ${stepEndTime - Math.min(stepStartTime, stepEndTime)}
+      github_actions_step_conclusion{${prometheusLabels(stepPromlabels)}"} ${stepConclusion === 'success' ? 1 : 0}
       `);
         }
         logger.info(`Reporting metrics to Prometheus Push Gateway (prometheusPushGatewayUrl=${prometheusPushGatewayUrl})`);
@@ -54381,6 +54401,12 @@ function run() {
     return __awaiter(this, void 0, void 0, function* () {
         try {
             const prometheusPushGatewayUrl = core.getInput('prometheus_push_gateway_url');
+            const prometheusPushGatewayExtraLabels_Input = core.getInput('prometheus_push_gateway_extra_labels');
+            let prometheusPushGatewayExtraLabels = new Map();
+            if (prometheusPushGatewayExtraLabels_Input) {
+                const d = JSON.parse(prometheusPushGatewayExtraLabels_Input);
+                prometheusPushGatewayExtraLabels = new Map(Object.entries(d));
+            }
             logger.info(`Finishing ...`);
             const currentJob = yield getCurrentJob();
             if (!currentJob) {
@@ -54405,7 +54431,7 @@ function run() {
                     logger.error('Skipping reporting metrics to Prometheus Push Gateway');
                 }
                 else {
-                    reportMetricsToPrometheusPushGateway(prometheusPushGatewayUrl, currentJob, stepTracerTelemetry);
+                    reportMetricsToPrometheusPushGateway(prometheusPushGatewayUrl, prometheusPushGatewayExtraLabels, currentJob, stepTracerTelemetry);
                     stepTracerContent = stepTracer.generateTraceChartFromTelemetryData(currentJob.name, stepTracerTelemetry);
                 }
             }

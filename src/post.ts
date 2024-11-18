@@ -111,8 +111,17 @@ async function reportAll(
   logger.info(`Reporting all content completed`)
 }
 
+function prometheusLabels(labels: Map<string, string>): string {
+  let s = ``
+  labels.forEach((value: string, key: string) => {
+    s += `,${key}="${value.replace(/"/g, '\\"')}"`
+  })
+  return s.replace(/^,/, '')
+}
+
 export async function reportMetricsToPrometheusPushGateway(
   prometheusPushGatewayUrl: string,
+  extraLabels: Map<string, string>,
   job: WorkflowJobType,
   stepsTelemetryData: stepTracer.TelemetryData[]
 ): Promise<void> {
@@ -130,27 +139,42 @@ export async function reportMetricsToPrometheusPushGateway(
   # HELP github_actions_step_conclusion Conclusion of the step. 1 for success, 0 for failure
   `
 
+  let extraLabelsStr = ``
+  extraLabels.forEach((value: string, key: string) => {
+    extraLabelsStr += `,${key}="${value.replace(/"/g, '\\"')}"`
+  })
+
   const jobDuration =
     new Date(job.completed_at ?? job.started_at).getTime() -
     new Date(job.started_at).getTime()
+
+  let jobPromLabels = new Map<string, string>()
+  jobPromLabels.set('head_sha', job.head_sha)
+  jobPromLabels.set('job_status', job.status)
+  jobPromLabels.set('job_conclusion', job.conclusion ?? 'unknown')
+  jobPromLabels = new Map([...jobPromLabels, ...extraLabels])
   promMetrics = promMetrics.concat(
     `
-    github_actions_job_duration_ms{head_sha="${job.head_sha}", job_status="${job.status}", job_conclusion="${job.conclusion}"} ${jobDuration}
-    github_actions_job_conclusion{head_sha="${job.head_sha}", job_status="${job.status}", job_conclusion="${job.conclusion}"} ${job.conclusion === 'success' ? 1 : 0}
+    github_actions_job_duration_ms{${prometheusLabels(jobPromLabels)}} ${jobDuration}
+    github_actions_job_conclusion{${prometheusLabels(jobPromLabels)}} ${job.conclusion === 'success' ? 1 : 0}
     `
   )
 
   for (const stepTelemetryData of stepsTelemetryData) {
     const stepName = stepTelemetryData.name
+    const stepNameSafe = stepName.replace(/"/g, '\\"')
     const stepConclusion = stepTelemetryData.conclusion
     const stepStartTime = stepTelemetryData.startTime.getTime()
     const stepEndTime = stepTelemetryData.endTime.getTime()
 
-    const stepNameSafe = stepName.replace(/"/g, '\\"')
+    let stepPromlabels = new Map<string, string>()
+    stepPromlabels.set('step_name', stepNameSafe)
+    stepPromlabels.set('step_conclusion', stepConclusion)
+    stepPromlabels = new Map([...stepPromlabels, ...jobPromLabels])
     promMetrics = promMetrics.concat(
       `
-      github_actions_step_duration_ms{head_sha="${job.head_sha}", job_status="${job.status}", job_conclusion="${job.conclusion}", step_name="${stepNameSafe}", step_conclusion="${stepConclusion}"} ${stepEndTime - Math.min(stepStartTime, stepEndTime)}
-      github_actions_step_conclusion{head_sha="${job.head_sha}", job_status="${job.status}", job_conclusion="${job.conclusion}", step_name="${stepNameSafe}", step_conclusion="${stepConclusion}"} ${stepConclusion === 'success' ? 1 : 0}
+      github_actions_step_duration_ms{${prometheusLabels(stepPromlabels)}"} ${stepEndTime - Math.min(stepStartTime, stepEndTime)}
+      github_actions_step_conclusion{${prometheusLabels(stepPromlabels)}"} ${stepConclusion === 'success' ? 1 : 0}
       `
     )
   }
@@ -182,6 +206,14 @@ async function run(): Promise<void> {
     const prometheusPushGatewayUrl = core.getInput(
       'prometheus_push_gateway_url'
     )
+    const prometheusPushGatewayExtraLabels_Input = core.getInput(
+      'prometheus_push_gateway_extra_labels'
+    )
+    let prometheusPushGatewayExtraLabels: Map<string, string> = new Map()
+    if (prometheusPushGatewayExtraLabels_Input) {
+      const d = JSON.parse(prometheusPushGatewayExtraLabels_Input)
+      prometheusPushGatewayExtraLabels = new Map(Object.entries(d))
+    }
 
     logger.info(`Finishing ...`)
 
@@ -218,6 +250,7 @@ async function run(): Promise<void> {
       } else {
         reportMetricsToPrometheusPushGateway(
           prometheusPushGatewayUrl,
+          prometheusPushGatewayExtraLabels,
           currentJob,
           stepTracerTelemetry
         )
