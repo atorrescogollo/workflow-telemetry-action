@@ -51,6 +51,10 @@ inputs:
     description: "Prometheus Push Gateway URL to push metrics. If not provided, metrics won't be pushed to Prometheus Push Gateway. It must be a valid URL and contain a job label reference. Example: 'http://pushgateway:9091/metrics/job/my-job'."
     default: ""
     required: false
+  prometheus_push_gateway_extra_labels:
+    description: "Extra labels to be added to the metrics pushed to Prometheus Push Gateway. It must be a valid JSON object. Example: '{\"my_label\": \"my_value\"}'."
+    default: "{}"
+    required: false
 
 runs:
   using: "node20"

@@ -113,10 +113,10 @@ async function reportAll(
 
 function prometheusLabels(labels: Map<string, string>): string {
   let s = ``
-  labels.forEach((value: string, key: string) => {
-    s += `,${key}="${value.replace(/"/g, '\\"')}"`
+  labels.forEach((v, k) => {
+    s += `${k}="${v}",`
   })
-  return s.replace(/^,/, '')
+  return s.slice(0, -1)
 }
 
 export async function reportMetricsToPrometheusPushGateway(
@@ -126,39 +126,36 @@ export async function reportMetricsToPrometheusPushGateway(
   stepsTelemetryData: stepTracer.TelemetryData[]
 ): Promise<void> {
   const jobStatus = core.getInput('job_status')
-  let promMetrics = `
-  # TYPE github_actions_job_duration_ms gauge
-  # HELP github_actions_job_duration_ms Elapsed time for the job in milliseconds
+  let promMetrics =
+    `
+# TYPE github_actions_job_duration_ms gauge
+# HELP github_actions_job_duration_ms Elapsed time for the job in milliseconds
 
-  # TYPE github_actions_job_conclusion gauge
-  # HELP github_actions_job_conclusion Conclusion of the job. 1 for success, 0 for failure
+# TYPE github_actions_job_conclusion gauge
+# HELP github_actions_job_conclusion Conclusion of the job. 1 for success, 0 for failure
 
-  # TYPE github_actions_step_duration_ms gauge
-  # HELP github_actions_step_duration_ms Elapsed time for the step in milliseconds
+# TYPE github_actions_step_duration_ms gauge
+# HELP github_actions_step_duration_ms Elapsed time for the step in milliseconds
 
-  # TYPE github_actions_step_conclusion gauge
-  # HELP github_actions_step_conclusion Conclusion of the step. 1 for success, 0 for failure
-  `
-
-  let extraLabelsStr = ``
-  extraLabels.forEach((value: string, key: string) => {
-    extraLabelsStr += `,${key}="${value.replace(/"/g, '\\"')}"`
-  })
+# TYPE github_actions_step_conclusion gauge
+# HELP github_actions_step_conclusion Conclusion of the step. 1 for success, 0 for failure
+  `.trim() + '\n'
 
   const jobDuration =
     new Date(job.completed_at ?? job.started_at).getTime() -
     new Date(job.started_at).getTime()
 
-  let jobPromLabels = new Map<string, string>()
-  jobPromLabels.set('head_sha', job.head_sha)
-  jobPromLabels.set('job_conclusion', jobStatus) // Can't use job.status or job.conclusion as they are not available yet since we are currently running in the job
-  jobPromLabels = new Map([...jobPromLabels, ...extraLabels])
-  promMetrics = promMetrics.concat(
+  const jobPromLabels = new Map([
+    ['head_sha', job.head_sha],
+    ['job_conclusion', jobStatus], // Can't use job.status or job.conclusion as they are not available yet since we are currently running in the job
+    ...extraLabels
+  ])
+  promMetrics =
     `
-    github_actions_job_duration_ms{${prometheusLabels(jobPromLabels)}} ${jobDuration}
-    github_actions_job_conclusion{${prometheusLabels(jobPromLabels)}} ${jobStatus === 'success' ? 1 : 0}
-    `
-  )
+${promMetrics}
+github_actions_job_duration_ms{${prometheusLabels(jobPromLabels)}} ${jobDuration}
+github_actions_job_conclusion{${prometheusLabels(jobPromLabels)}} ${jobStatus === 'success' ? 1 : 0}
+    `.trim() + '\n'
 
   for (const stepTelemetryData of stepsTelemetryData) {
     const stepName = stepTelemetryData.name
@@ -167,25 +164,30 @@ export async function reportMetricsToPrometheusPushGateway(
     const stepStartTime = stepTelemetryData.startTime.getTime()
     const stepEndTime = stepTelemetryData.endTime.getTime()
 
-    let stepPromlabels = new Map<string, string>()
-    stepPromlabels.set('step_name', stepNameSafe)
-    stepPromlabels.set('step_conclusion', stepConclusion)
-    stepPromlabels = new Map([...stepPromlabels, ...jobPromLabels])
-    promMetrics = promMetrics.concat(
-      `
-      github_actions_step_duration_ms{${prometheusLabels(stepPromlabels)}"} ${stepEndTime - Math.min(stepStartTime, stepEndTime)}
-      github_actions_step_conclusion{${prometheusLabels(stepPromlabels)}"} ${stepConclusion === 'success' ? 1 : 0}
-      `
-    )
+    const stepPromlabels = new Map([
+      ['step_name', stepNameSafe],
+      ['step_conclusion', stepConclusion],
+      ...jobPromLabels
+    ])
+    promMetrics = `
+${promMetrics}
+github_actions_step_duration_ms{${prometheusLabels(stepPromlabels)}} ${stepEndTime - Math.min(stepStartTime, stepEndTime)}
+github_actions_step_conclusion{${prometheusLabels(stepPromlabels)}} ${stepConclusion === 'success' ? 1 : 0}
+      `.trim()
   }
 
   logger.info(
     `Reporting metrics to Prometheus Push Gateway (prometheusPushGatewayUrl=${prometheusPushGatewayUrl})`
   )
+  logger.info(
+    `::group::Metrics\n` +
+      `Metrics: \n\n---\n${promMetrics}\n---` +
+      `\n::endgroup::`
+  )
   try {
     const response = await fetch(prometheusPushGatewayUrl, {
       method: 'PUT',
-      body: promMetrics
+      body: '\n' + promMetrics.trim() + '\n'
     })
     if (!response.ok) {
       throw new Error(
@@ -206,14 +208,11 @@ async function run(): Promise<void> {
     const prometheusPushGatewayUrl = core.getInput(
       'prometheus_push_gateway_url'
     )
-    const prometheusPushGatewayExtraLabels_Input = core.getInput(
-      'prometheus_push_gateway_extra_labels'
+    const prometheusPushGatewayExtraLabels: Map<string, string> = new Map(
+      Object.entries(
+        JSON.parse(core.getInput('prometheus_push_gateway_extra_labels'))
+      )
     )
-    let prometheusPushGatewayExtraLabels: Map<string, string> = new Map()
-    if (prometheusPushGatewayExtraLabels_Input) {
-      const d = JSON.parse(prometheusPushGatewayExtraLabels_Input)
-      prometheusPushGatewayExtraLabels = new Map(Object.entries(d))
-    }
 
     logger.info(`Finishing ...`)
 
