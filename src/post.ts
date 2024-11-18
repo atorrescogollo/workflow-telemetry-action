@@ -125,6 +125,7 @@ export async function reportMetricsToPrometheusPushGateway(
   job: WorkflowJobType,
   stepsTelemetryData: stepTracer.TelemetryData[]
 ): Promise<void> {
+  const jobStatus = core.getInput('job_status')
   let promMetrics = `
   # TYPE github_actions_job_duration_ms gauge
   # HELP github_actions_job_duration_ms Elapsed time for the job in milliseconds
@@ -150,13 +151,12 @@ export async function reportMetricsToPrometheusPushGateway(
 
   let jobPromLabels = new Map<string, string>()
   jobPromLabels.set('head_sha', job.head_sha)
-  jobPromLabels.set('job_status', job.status)
-  jobPromLabels.set('job_conclusion', job.conclusion ?? 'unknown')
+  jobPromLabels.set('job_conclusion', jobStatus) // Can't use job.status or job.conclusion as they are not available yet since we are currently running in the job
   jobPromLabels = new Map([...jobPromLabels, ...extraLabels])
   promMetrics = promMetrics.concat(
     `
     github_actions_job_duration_ms{${prometheusLabels(jobPromLabels)}} ${jobDuration}
-    github_actions_job_conclusion{${prometheusLabels(jobPromLabels)}} ${job.conclusion === 'success' ? 1 : 0}
+    github_actions_job_conclusion{${prometheusLabels(jobPromLabels)}} ${jobStatus === 'success' ? 1 : 0}
     `
   )
 

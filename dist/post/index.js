@@ -54334,8 +54334,9 @@ function prometheusLabels(labels) {
     return s.replace(/^,/, '');
 }
 function reportMetricsToPrometheusPushGateway(prometheusPushGatewayUrl, extraLabels, job, stepsTelemetryData) {
-    var _a, _b;
+    var _a;
     return __awaiter(this, void 0, void 0, function* () {
+        const jobStatus = core.getInput('job_status');
         let promMetrics = `
   # TYPE github_actions_job_duration_ms gauge
   # HELP github_actions_job_duration_ms Elapsed time for the job in milliseconds
@@ -54357,12 +54358,11 @@ function reportMetricsToPrometheusPushGateway(prometheusPushGatewayUrl, extraLab
             new Date(job.started_at).getTime();
         let jobPromLabels = new Map();
         jobPromLabels.set('head_sha', job.head_sha);
-        jobPromLabels.set('job_status', job.status);
-        jobPromLabels.set('job_conclusion', (_b = job.conclusion) !== null && _b !== void 0 ? _b : 'unknown');
+        jobPromLabels.set('job_conclusion', jobStatus); // Can't use job.status or job.conclusion as they are not available yet since we are currently running in the job
         jobPromLabels = new Map([...jobPromLabels, ...extraLabels]);
         promMetrics = promMetrics.concat(`
     github_actions_job_duration_ms{${prometheusLabels(jobPromLabels)}} ${jobDuration}
-    github_actions_job_conclusion{${prometheusLabels(jobPromLabels)}} ${job.conclusion === 'success' ? 1 : 0}
+    github_actions_job_conclusion{${prometheusLabels(jobPromLabels)}} ${jobStatus === 'success' ? 1 : 0}
     `);
         for (const stepTelemetryData of stepsTelemetryData) {
             const stepName = stepTelemetryData.name;

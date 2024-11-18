@@ -6,6 +6,11 @@ inputs:
     description: "GitHub API Access Token"
     default: ${{ github.token }}
     required: false
+  job_status:
+    # https://github.com/orgs/community/discussions/26451
+    description: "Internally used to determine the status of the job. Usually, you should not set this input manually. It is set automatically by the action."
+    default: "${{ job.status }}"
+    required: false
   metric_frequency:
     description: "Metric collection frequency in seconds. Must be a number. Defaults to '5'."
     default: "5"
