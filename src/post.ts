@@ -126,24 +126,41 @@ export async function reportMetricsToPrometheusPushGateway(
   stepsTelemetryData: stepTracer.TelemetryData[]
 ): Promise<void> {
   const jobStatus = core.getInput('job_status')
+  const [jobStartTime, jobEndTime] = [
+    new Date(stepsTelemetryData[0].startTime),
+    new Date(stepsTelemetryData[stepsTelemetryData.length - 1].endTime)
+  ]
   let promMetrics =
     `
-# TYPE github_actions_job_duration_ms gauge
-# HELP github_actions_job_duration_ms Elapsed time for the job in milliseconds
+# TYPE github_actions_job_start_time_seconds gauge
+# HELP github_actions_job_start_time_seconds Start time of the job in seconds since epoch
+
+# TYPE github_actions_job_end_time_seconds gauge
+# HELP github_actions_job_end_time_seconds End time of the job in seconds since epoch
+
+# TYPE github_actions_job_duration_seconds gauge
+# HELP github_actions_job_duration_seconds Elapsed time for the job in seconds
 
 # TYPE github_actions_job_conclusion gauge
 # HELP github_actions_job_conclusion Conclusion of the job. 1 for success, 0 for failure
 
-# TYPE github_actions_step_duration_ms gauge
-# HELP github_actions_step_duration_ms Elapsed time for the step in milliseconds
+# TYPE github_actions_step_start_time_seconds gauge
+# HELP github_actions_step_start_time_seconds Start time of the step in seconds since epoch
+
+# TYPE github_actions_step_end_time_seconds gauge
+# HELP github_actions_step_end_time_seconds End time of the step in seconds since epoch
+
+# TYPE github_actions_step_duration_since_job_start_seconds gauge
+# HELP github_actions_step_duration_since_job_start_seconds Elapsed time for the step in seconds since the job started
+
+# TYPE github_actions_step_duration_seconds gauge
+# HELP github_actions_step_duration_seconds Elapsed time for the step in seconds
 
 # TYPE github_actions_step_conclusion gauge
 # HELP github_actions_step_conclusion Conclusion of the step. 1 for success, 0 for failure
   `.trim() + '\n'
 
-  const jobDuration =
-    new Date(job.completed_at ?? job.started_at).getTime() -
-    new Date(job.started_at).getTime()
+  const jobDuration = jobEndTime.getTime() - jobStartTime.getTime()
 
   const jobPromLabels = new Map([
     ['head_sha', job.head_sha],
@@ -153,7 +170,9 @@ export async function reportMetricsToPrometheusPushGateway(
   promMetrics =
     `
 ${promMetrics}
-github_actions_job_duration_ms{${prometheusLabels(jobPromLabels)}} ${jobDuration}
+github_actions_job_start_time_seconds{${prometheusLabels(jobPromLabels)}} ${jobStartTime.getTime() / 1000}
+github_actions_job_end_time_seconds{${prometheusLabels(jobPromLabels)}} ${jobEndTime.getTime() / 1000}
+github_actions_job_duration_seconds{${prometheusLabels(jobPromLabels)}} ${jobDuration / 1000}
 github_actions_job_conclusion{${prometheusLabels(jobPromLabels)}} ${jobStatus === 'success' ? 1 : 0}
     `.trim() + '\n'
 
@@ -161,8 +180,8 @@ github_actions_job_conclusion{${prometheusLabels(jobPromLabels)}} ${jobStatus ==
     const stepName = stepTelemetryData.name
     const stepNameSafe = stepName.replace(/"/g, '\\"')
     const stepConclusion = stepTelemetryData.conclusion
-    const stepStartTime = stepTelemetryData.startTime.getTime()
-    const stepEndTime = stepTelemetryData.endTime.getTime()
+    const stepStartTime = stepTelemetryData.startTime
+    const stepEndTime = stepTelemetryData.endTime
 
     const stepPromlabels = new Map([
       ['step_name', stepNameSafe],
@@ -171,7 +190,10 @@ github_actions_job_conclusion{${prometheusLabels(jobPromLabels)}} ${jobStatus ==
     ])
     promMetrics = `
 ${promMetrics}
-github_actions_step_duration_ms{${prometheusLabels(stepPromlabels)}} ${stepEndTime - Math.min(stepStartTime, stepEndTime)}
+github_actions_step_start_time_seconds{${prometheusLabels(stepPromlabels)}} ${stepStartTime.getTime() / 1000}
+github_actions_step_end_time_seconds{${prometheusLabels(stepPromlabels)}} ${stepEndTime.getTime() / 1000}
+github_actions_step_duration_seconds{${prometheusLabels(stepPromlabels)}} ${(stepEndTime.getTime() - stepStartTime.getTime()) / 1000}
+github_actions_step_duration_since_job_start_seconds{${prometheusLabels(stepPromlabels)}} ${(stepEndTime.getTime() - jobStartTime.getTime()) / 1000}
 github_actions_step_conclusion{${prometheusLabels(stepPromlabels)}} ${stepConclusion === 'success' ? 1 : 0}
       `.trim()
   }

@@ -66,24 +66,47 @@ describe('Prometheus Push Gateway', () => {
         init: {
           method: 'PUT',
           body: `
-# TYPE github_actions_job_duration_ms gauge
-# HELP github_actions_job_duration_ms Elapsed time for the job in milliseconds
+# TYPE github_actions_job_start_time_seconds gauge
+# HELP github_actions_job_start_time_seconds Start time of the job in seconds since epoch
+
+# TYPE github_actions_job_end_time_seconds gauge
+# HELP github_actions_job_end_time_seconds End time of the job in seconds since epoch
+
+# TYPE github_actions_job_duration_seconds gauge
+# HELP github_actions_job_duration_seconds Elapsed time for the job in seconds
 
 # TYPE github_actions_job_conclusion gauge
 # HELP github_actions_job_conclusion Conclusion of the job. 1 for success, 0 for failure
 
-# TYPE github_actions_step_duration_ms gauge
-# HELP github_actions_step_duration_ms Elapsed time for the step in milliseconds
+# TYPE github_actions_step_start_time_seconds gauge
+# HELP github_actions_step_start_time_seconds Start time of the step in seconds since epoch
+
+# TYPE github_actions_step_end_time_seconds gauge
+# HELP github_actions_step_end_time_seconds End time of the step in seconds since epoch
+
+# TYPE github_actions_step_duration_since_job_start_seconds gauge
+# HELP github_actions_step_duration_since_job_start_seconds Elapsed time for the step in seconds since the job started
+
+# TYPE github_actions_step_duration_seconds gauge
+# HELP github_actions_step_duration_seconds Elapsed time for the step in seconds
 
 # TYPE github_actions_step_conclusion gauge
 # HELP github_actions_step_conclusion Conclusion of the step. 1 for success, 0 for failure
 
-github_actions_job_duration_ms{head_sha="123456",job_conclusion="success",labelname1="labelvalue1"} 3600000
+github_actions_job_start_time_seconds{head_sha="123456",job_conclusion="success",labelname1="labelvalue1"} 1627776000
+github_actions_job_end_time_seconds{head_sha="123456",job_conclusion="success",labelname1="labelvalue1"} 1627776120
+github_actions_job_duration_seconds{head_sha="123456",job_conclusion="success",labelname1="labelvalue1"} 120
 github_actions_job_conclusion{head_sha="123456",job_conclusion="success",labelname1="labelvalue1"} 1
 
-github_actions_step_duration_ms{step_name="step1",step_conclusion="success",head_sha="123456",job_conclusion="success",labelname1="labelvalue1"} 1000
+github_actions_step_start_time_seconds{step_name="step1",step_conclusion="success",head_sha="123456",job_conclusion="success",labelname1="labelvalue1"} 1627776000
+github_actions_step_end_time_seconds{step_name="step1",step_conclusion="success",head_sha="123456",job_conclusion="success",labelname1="labelvalue1"} 1627776001
+github_actions_step_duration_seconds{step_name="step1",step_conclusion="success",head_sha="123456",job_conclusion="success",labelname1="labelvalue1"} 1
+github_actions_step_duration_since_job_start_seconds{step_name="step1",step_conclusion="success",head_sha="123456",job_conclusion="success",labelname1="labelvalue1"} 1
 github_actions_step_conclusion{step_name="step1",step_conclusion="success",head_sha="123456",job_conclusion="success",labelname1="labelvalue1"} 1
-github_actions_step_duration_ms{step_name="step2",step_conclusion="success",head_sha="123456",job_conclusion="success",labelname1="labelvalue1"} 119000
+github_actions_step_start_time_seconds{step_name="step2",step_conclusion="success",head_sha="123456",job_conclusion="success",labelname1="labelvalue1"} 1627776001
+github_actions_step_end_time_seconds{step_name="step2",step_conclusion="success",head_sha="123456",job_conclusion="success",labelname1="labelvalue1"} 1627776120
+github_actions_step_duration_seconds{step_name="step2",step_conclusion="success",head_sha="123456",job_conclusion="success",labelname1="labelvalue1"} 119
+github_actions_step_duration_since_job_start_seconds{step_name="step2",step_conclusion="success",head_sha="123456",job_conclusion="success",labelname1="labelvalue1"} 120
 github_actions_step_conclusion{step_name="step2",step_conclusion="success",head_sha="123456",job_conclusion="success",labelname1="labelvalue1"} 1
 `
         }
